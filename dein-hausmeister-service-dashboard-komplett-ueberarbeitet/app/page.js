@@ -1,143 +1,63 @@
 "use client";
+import { useState } from "react";
+import QRFlow from "../components/QRFlow";
+import HausmeisterApp from "../components/HausmeisterApp";
+import AdminPortal from "../components/AdminPortal";
+import HVPortal from "../components/HVPortal";
+import Rechnungen from "../components/Rechnungen";
+import { GR, GD } from "../lib/theme";
 
-import { useEffect, useState } from "react";
-import FiltersBar from "../components/FiltersBar";
-import TicketsTable from "../components/TicketsTable";
+const TABS = [
+  ["qr",  "📱", "Bewohner QR"],
+  ["app", "🔧", "Hausmeister App"],
+  ["adm", "🛡️", "Admin Portal"],
+  ["hv",  "🏢", "HV Portal"],
+  ["inv", "💶", "Rechnungen"],
+];
 
-export default function DashboardPage() {
-  const [tab, setTab] = useState("meldungen");
-  const [tickets, setTickets] = useState([]);
-  const [loading, setLoading] = useState(false);
-  const [objektFilter, setObjektFilter] = useState("Alle Objekte");
-  const [statusFilter, setStatusFilter] = useState("Jeder Status");
-  const [responsibilityFilter, setResponsibilityFilter] =
-    useState("Jede Verantwortung");
-  const [error, setError] = useState("");
-
-  const loadTickets = async () => {
-    try {
-      setLoading(true);
-      setError("");
-      const res = await fetch("/api/tickets");
-      if (!res.ok) throw new Error("Fehler beim Laden der Meldungen");
-      const data = await res.json();
-      setTickets(data.tickets);
-    } catch (e) {
-      setError(e.message || "Unbekannter Fehler");
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  useEffect(() => {
-    loadTickets();
-  }, []);
-
-  const handleUpdateTicket = async (id, updates) => {
-    try {
-      setError("");
-      const res = await fetch(`/api/tickets/${id}`, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(updates)
-      });
-      if (!res.ok) throw new Error("Update fehlgeschlagen");
-      const data = await res.json();
-      setTickets(data.tickets);
-    } catch (e) {
-      console.error(e);
-      setError(e.message || "Update fehlgeschlagen");
-    }
-  };
-
-  const qrUrl =
-    typeof window !== "undefined"
-      ? `${window.location.origin}/report`
-      : "https://dein-hausmeister-service-dashbord-f-iota.vercel.app/report";
+export default function App() {
+  const [view, setView] = useState("qr");
+  const mobile = view === "qr" || view === "app";
 
   return (
-    <>
-      <header className="app-header">
-        <div className="flex items-center gap-3">
-          <img
-            src="/logo.png"
-            alt="Dein Hausmeister-Service Logo"
-            className="h-12 w-auto"
-          />
-          <div className="flex flex-col">
-            <div className="text-base font-semibold text-slate-800">
-              Dein Hausmeister-Service
-            </div>
-            <div className="text-xs text-slate-500 -mt-1">
-              Zuhause ist das Wichtigste
-            </div>
+    <div style={{ minHeight: "100vh", background: "#0e1822", display: "flex", flexDirection: "column" }}>
+      <div style={{ background: "#091120", borderBottom: "1px solid rgba(255,255,255,0.07)",
+        display: "flex", alignItems: "stretch", padding: "0 20px", gap: 0, flexShrink: 0, overflowX: "auto" }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 10, paddingRight: 24,
+          borderRight: "1px solid rgba(255,255,255,0.07)", marginRight: 8 }}>
+          <div style={{ width: 28, height: 28, borderRadius: 7, background: `linear-gradient(135deg,${GR},${GD})`,
+            display: "flex", alignItems: "center", justifyContent: "center", fontSize: 14, flexShrink: 0 }}>🏠</div>
+          <div>
+            <div style={{ color: "#fff", fontSize: 11, fontWeight: 900, letterSpacing: -0.2 }}>DEIN HAUSMEISTER</div>
+            <div style={{ color: GR, fontSize: 8, fontWeight: 700, letterSpacing: 2 }}>BETA v0.2</div>
           </div>
         </div>
-
-
-      </header>
-
-      <main className="app-main space-y-4">
-        <nav className="app-nav">
-          <button
-            className={`app-nav-button ${
-              tab === "meldungen"
-                ? "app-nav-button-active"
-                : "app-nav-button-inactive"
-            }`}
-            onClick={() => setTab("meldungen")}
-          >
-            Meldungen
+        {TABS.map(([k, ic, lb]) => (
+          <button key={k} onClick={() => setView(k)} style={{
+            display: "flex", alignItems: "center", gap: 6, padding: "0 16px", border: "none",
+            background: "none", cursor: "pointer", fontFamily: "inherit", fontWeight: view === k ? 700 : 500,
+            fontSize: 12, color: view === k ? "#fff" : "rgba(255,255,255,0.4)",
+            borderBottom: view === k ? `2.5px solid ${GR}` : "2.5px solid transparent",
+            transition: "all .15s", whiteSpace: "nowrap",
+          }}>
+            <span style={{ fontSize: 14 }}>{ic}</span>{lb}
           </button>
-          <button
-            className={`app-nav-button ${
-              tab === "verlauf"
-                ? "app-nav-button-active"
-                : "app-nav-button-inactive"
-            }`}
-            onClick={() => setTab("verlauf")}
-          >
-            Verlauf
-          </button>
-        </nav>
+        ))}
+      </div>
 
-        <section className="card">
-          <div className="card-header">
-            <h2 className="card-title">
-              {tab === "meldungen"
-                ? "Aktuelle Schadenmeldungen"
-                : "Verlauf & Historie"}
-            </h2>
-            <FiltersBar
-              objekt={objektFilter}
-              setObjekt={setObjektFilter}
-              status={statusFilter}
-              setStatus={setStatusFilter}
-              responsibility={responsibilityFilter}
-              setResponsibility={setResponsibilityFilter}
-            />
-          </div>
-          <div className="card-body">
-            {loading && (
-              <div className="text-sm text-slate-500 mb-2">
-                Lade Meldungen …
-              </div>
-            )}
-            {error && (
-              <div className="mb-3 text-xs text-rose-600 bg-rose-50 border border-rose-200 px-3 py-2 rounded-xl">
-                {error}
-              </div>
-            )}
-            <TicketsTable
-              tickets={tickets}
-              objektFilter={objektFilter}
-              statusFilter={statusFilter}
-              responsibilityFilter={responsibilityFilter}
-              onUpdateTicket={handleUpdateTicket}
-            />
-          </div>
-        </section>
-      </main>
-    </>
+      {mobile ? (
+        <div style={{ flex: 1, display: "flex", alignItems: "flex-start", justifyContent: "center",
+          padding: "36px 24px" }}>
+          {view === "qr"  && <QRFlow/>}
+          {view === "app" && <HausmeisterApp/>}
+        </div>
+      ) : (
+        <div style={{ flex: 1, overflow: "hidden", display: "flex", flexDirection: "column" }}>
+          {view === "adm" && <AdminPortal/>}
+          {view === "hv"  && <HVPortal/>}
+          {view === "inv" && <Rechnungen/>}
+        </div>
+      )}
+    </div>
   );
 }
