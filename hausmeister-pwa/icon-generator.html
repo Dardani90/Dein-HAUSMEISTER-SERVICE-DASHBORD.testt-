@@ -1,0 +1,154 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+  <meta charset="UTF-8"/>
+  <title>Icon Generator – Dein Hausmeister</title>
+  <style>
+    body { font-family: system-ui, sans-serif; background: #0e1822; color: #fff;
+      display: flex; flex-direction: column; align-items: center; padding: 40px 20px; gap: 24px; }
+    h1 { font-size: 20px; }
+    p  { color: rgba(255,255,255,0.6); font-size: 13px; text-align: center; max-width: 420px; }
+    #preview { display: flex; gap: 16px; flex-wrap: wrap; justify-content: center; }
+    canvas { border-radius: 22%; display: none; }
+    .btn { background: #43A047; color: #fff; border: none; border-radius: 10px;
+      padding: 12px 24px; font-size: 14px; font-weight: 700; cursor: pointer;
+      margin-top: 8px; text-decoration: none; display: block; text-align: center; }
+    .card { background: rgba(255,255,255,0.07); border-radius: 14px; padding: 16px;
+      display: flex; flex-direction: column; align-items: center; gap: 10px; }
+    .sz { color: rgba(255,255,255,0.4); font-size: 11px; }
+    #status { color: #43A047; font-weight: 700; display: none; }
+    img { border-radius: 22%; }
+  </style>
+</head>
+<body>
+  <h1>🏠 Icon Generator</h1>
+  <p>Klicke auf „Icons generieren" – dann lade alle Icons herunter und lege sie in den Ordner <strong>icons/</strong> neben der index.html.</p>
+  <button class="btn" onclick="generate()">Icons generieren & herunterladen</button>
+  <div id="status">✓ Alle Icons generiert! Lege sie in den icons/ Ordner.</div>
+  <div id="preview"></div>
+
+<script>
+const SIZES = [72, 96, 128, 144, 152, 192, 384, 512];
+
+function drawIcon(size) {
+  const c = document.createElement('canvas');
+  c.width = size; c.height = size;
+  const ctx = c.getContext('2d');
+
+  // Rounded rect background
+  const r = size * 0.22;
+  const g = ctx.createLinearGradient(0, 0, size, size);
+  g.addColorStop(0, '#43A047');
+  g.addColorStop(1, '#2E7D32');
+  ctx.fillStyle = g;
+  ctx.beginPath();
+  ctx.moveTo(r, 0);
+  ctx.arcTo(size, 0, size, size, r);
+  ctx.arcTo(size, size, 0, size, r);
+  ctx.arcTo(0, size, 0, 0, r);
+  ctx.arcTo(0, 0, size, 0, r);
+  ctx.closePath();
+  ctx.fill();
+
+  // Subtle inner glow
+  const glow = ctx.createRadialGradient(size*0.35, size*0.3, 0, size/2, size/2, size*0.6);
+  glow.addColorStop(0, 'rgba(255,255,255,0.18)');
+  glow.addColorStop(1, 'rgba(255,255,255,0)');
+  ctx.fillStyle = glow;
+  ctx.fill();
+
+  // House icon (path-based for crisp rendering)
+  ctx.fillStyle = '#fff';
+  ctx.shadowColor = 'rgba(0,0,0,0.25)';
+  ctx.shadowBlur = size * 0.04;
+
+  const cx = size / 2;
+  const cy = size * 0.44;
+  const w  = size * 0.52;
+  const h  = size * 0.38;
+
+  // Roof
+  ctx.beginPath();
+  ctx.moveTo(cx, cy - h * 0.65);
+  ctx.lineTo(cx + w / 2 + size*0.02, cy);
+  ctx.lineTo(cx - w / 2 - size*0.02, cy);
+  ctx.closePath();
+  ctx.fill();
+
+  // Body
+  const bx = cx - w * 0.38;
+  const by = cy;
+  const bw = w * 0.76;
+  const bh = h * 0.6;
+  ctx.fillRect(bx, by, bw, bh);
+
+  // Door (dark)
+  ctx.fillStyle = '#2E7D32';
+  ctx.shadowBlur = 0;
+  const dw = bw * 0.28, dh = bh * 0.52;
+  const dx = cx - dw / 2, dy = by + bh - dh;
+  ctx.beginPath();
+  ctx.roundRect(dx, dy, dw, dh, dw * 0.25);
+  ctx.fill();
+
+  // Brand text
+  ctx.shadowBlur = 0;
+  ctx.fillStyle = 'rgba(255,255,255,0.9)';
+  const fs = Math.max(size * 0.085, 7);
+  ctx.font = `900 ${fs}px 'Arial Black', Arial, sans-serif`;
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'alphabetic';
+  ctx.fillText('HAUSMEISTER', cx, size * 0.88);
+
+  return c;
+}
+
+function generate() {
+  const preview = document.getElementById('preview');
+  const status  = document.getElementById('status');
+  preview.innerHTML = '';
+
+  SIZES.forEach(size => {
+    const canvas = drawIcon(size);
+
+    canvas.toBlob(blob => {
+      const url  = URL.createObjectURL(blob);
+      const name = `icon-${size}.png`;
+
+      const card = document.createElement('div');
+      card.className = 'card';
+
+      const img  = document.createElement('img');
+      img.src    = url;
+      img.width  = Math.min(size, 80);
+      img.height = Math.min(size, 80);
+      img.style.borderRadius = '22%';
+
+      const sz = document.createElement('div');
+      sz.className = 'sz';
+      sz.textContent = `${size}×${size}`;
+
+      const a  = document.createElement('a');
+      a.href     = url;
+      a.download = name;
+      a.className= 'btn';
+      a.style.padding = '7px 14px';
+      a.style.fontSize= '11px';
+      a.style.marginTop = '0';
+      a.textContent = '↓ ' + name;
+
+      card.append(img, sz, a);
+      preview.appendChild(card);
+
+      // Auto-download
+      const dl = document.createElement('a');
+      dl.href = url; dl.download = name;
+      document.body.appendChild(dl); dl.click(); document.body.removeChild(dl);
+    }, 'image/png');
+  });
+
+  status.style.display = 'block';
+}
+</script>
+</body>
+</html>

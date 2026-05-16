@@ -1,0 +1,1091 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover"/>
+  <title>Dein Hausmeister · Beta v0.2</title>
+
+  <!-- PWA Manifest -->
+  <link rel="manifest" href="manifest.json"/>
+
+  <!-- Theme & Status Bar -->
+  <meta name="theme-color" content="#43A047"/>
+  <meta name="mobile-web-app-capable" content="yes"/>
+  <meta name="apple-mobile-web-app-capable" content="yes"/>
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent"/>
+  <meta name="apple-mobile-web-app-title" content="Hausmeister"/>
+
+  <!-- Apple Touch Icons -->
+  <link rel="apple-touch-icon" sizes="152x152" href="icons/icon-152.png"/>
+  <link rel="apple-touch-icon" sizes="192x192" href="icons/icon-192.png"/>
+  <link rel="apple-touch-icon" sizes="512x512" href="icons/icon-512.png"/>
+
+  <!-- Favicon -->
+  <link rel="icon" type="image/png" sizes="192x192" href="icons/icon-192.png"/>
+  <link rel="icon" type="image/png" sizes="512x512" href="icons/icon-512.png"/>
+
+  <!-- SEO -->
+  <meta name="description" content="Professionelles Hausmeister-Service Management – QR-Schadensmeldung, Aufgabenverwaltung, Rechnungen und Rollenverwaltung. Beta v0.2"/>
+  <meta name="keywords" content="Hausmeister, Hausverwaltung, Schadensmeldung, Aufgaben, Rechnungen"/>
+  <meta property="og:title" content="Dein Hausmeister · Beta v0.2"/>
+  <meta property="og:description" content="Professionelles Hausmeister-Service Management"/>
+  <meta property="og:image" content="icons/icon-512.png"/>
+  <meta property="og:type" content="website"/>
+
+  <!-- Fonts -->
+  <link rel="preconnect" href="https://fonts.googleapis.com"/>
+  <link href="https://fonts.googleapis.com/css2?family=Figtree:wght@400;500;600;700;800;900&display=swap" rel="stylesheet"/>
+
+  <!-- React & Babel -->
+  <script src="https://unpkg.com/react@18/umd/react.production.min.js" crossorigin></script>
+  <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js" crossorigin></script>
+  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+
+  <style>
+    *{box-sizing:border-box;margin:0;padding:0;-webkit-font-smoothing:antialiased;}
+    html,body,#root{height:100%;}
+    body{background:#0e1822;color:#fff;font-family:'Figtree',system-ui,sans-serif;}
+    #root{display:flex;flex-direction:column;}
+    @keyframes scan{0%{top:15%;}50%{top:78%;}100%{top:15%;}}
+    @keyframes pulse{0%,100%{opacity:1;}50%{opacity:.6;}}
+    ::-webkit-scrollbar{width:5px;height:5px;}
+    ::-webkit-scrollbar-track{background:transparent;}
+    ::-webkit-scrollbar-thumb{background:rgba(0,0,0,0.15);border-radius:99px;}
+    select,input,textarea,button{font-family:'Figtree',system-ui,sans-serif;}
+
+    /* iOS safe area */
+    body { padding-top: env(safe-area-inset-top); padding-bottom: env(safe-area-inset-bottom); }
+
+    /* Offline banner */
+    #offline-banner{display:none;position:fixed;top:0;left:0;right:0;z-index:9999;
+      background:#FB8C00;color:#fff;text-align:center;padding:8px;font-size:12px;font-weight:700;}
+    body.offline #offline-banner{display:block;}
+  </style>
+</head>
+<body>
+<div id="offline-banner">📶 Offline – App läuft im Cache-Modus</div>
+<div id="root"></div>
+
+<script>
+  // Service Worker registrieren
+  if ('serviceWorker' in navigator) {
+    window.addEventListener('load', () => {
+      navigator.serviceWorker.register('/sw.js')
+        .then(reg => console.log('SW registered:', reg.scope))
+        .catch(err => console.log('SW failed:', err));
+    });
+  }
+
+  // Offline / Online Status
+  function updateOnlineStatus() {
+    document.body.classList.toggle('offline', !navigator.onLine);
+  }
+  window.addEventListener('online',  updateOnlineStatus);
+  window.addEventListener('offline', updateOnlineStatus);
+  updateOnlineStatus();
+
+  // URL-Parameter für Tab-Direktlinks (?tab=qr etc.)
+  window.__initialTab = new URLSearchParams(location.search).get('tab') || 'qr';
+</script>
+
+<script type="text/babel" data-presets="react">
+const { useState } = React;
+
+/* ── Theme ──────────────────────────────────────────────── */
+const F  = "'Figtree', system-ui, sans-serif";
+const GR = "#43A047", GD = "#2E7D32", GL = "#E8F5E9";
+const BG = "#F4F6F9", WH = "#FFFFFF";
+const TX = "#111827", T2 = "#374151", MU = "#6B7280", ML = "#9CA3AF";
+const BR = "#E5E7EB", B2 = "#F9FAFB";
+const OR = "#FB8C00", BL = "#2563EB", RE = "#DC2626", PU = "#7C3AED";
+const SB = "#1C2538";
+
+const statusStyle = s => ({
+  "In Arbeit":{c:OR,bg:"#FFF3E0"},
+  "Neu":{c:BL,bg:"#EFF6FF"},
+  "Zugewiesen":{c:PU,bg:"#F5F3FF"},
+  "Erledigt":{c:GR,bg:GL},
+  "Offen":{c:MU,bg:B2},
+  "Bezahlt":{c:GR,bg:GL},
+}[s] || {c:MU,bg:B2});
+
+/* ── Shared Components ──────────────────────────────────── */
+
+function Pill({ s, small }) {
+  const { c, bg } = statusStyle(s);
+  return (
+    <span style={{background:bg,color:c,borderRadius:20,
+      padding:small?"2px 8px":"3px 11px",
+      fontSize:small?10:11,fontWeight:700,whiteSpace:"nowrap"}}>
+      {s}
+    </span>
+  );
+}
+
+function GBtn({ label, onClick, variant="fill" }) {
+  return (
+    <button onClick={onClick}
+      onMouseEnter={e=>{e.currentTarget.style.transform="scale(1.02)";e.currentTarget.style.opacity=".93";}}
+      onMouseLeave={e=>{e.currentTarget.style.transform="none";e.currentTarget.style.opacity="1";}}
+      style={{width:"100%",padding:"13px 0",borderRadius:13,cursor:"pointer",
+        fontFamily:F,fontWeight:700,fontSize:14,transition:"all .15s",
+        background:variant==="fill"?`linear-gradient(150deg,${GR},${GD})`:WH,
+        color:variant==="fill"?"#fff":TX,
+        border:variant==="out"?`1.5px solid ${BR}`:"none",
+        boxShadow:variant==="fill"?`0 4px 14px ${GR}44`:"none"}}>
+      {label}
+    </button>
+  );
+}
+
+function Phone({ children, dark }) {
+  return (
+    <div style={{width:300,height:620,borderRadius:40,border:"7px solid #111",
+      background:dark?"#000":BG,overflow:"hidden",flexShrink:0,
+      boxShadow:"0 28px 70px rgba(0,0,0,0.55), 0 0 0 1px rgba(255,255,255,0.06)",
+      display:"flex",flexDirection:"column",position:"relative"}}>
+      <div style={{position:"absolute",top:0,left:"50%",transform:"translateX(-50%)",
+        width:82,height:20,background:"#111",borderRadius:"0 0 12px 12px",zIndex:30}}/>
+      <div style={{height:32,display:"flex",alignItems:"center",justifyContent:"space-between",
+        padding:"0 18px",flexShrink:0,position:"relative",zIndex:20}}>
+        <span style={{fontSize:11,fontWeight:800,color:dark?"#fff":TX,letterSpacing:-0.3}}>9:41</span>
+        <div style={{display:"flex",gap:3,alignItems:"flex-end"}}>
+          {[5,8,11,14].map((h,i)=>(
+            <div key={i} style={{width:2.5,height:h,background:dark?"#fff":TX,
+              borderRadius:1,opacity:i===3?0.35:1}}/>
+          ))}
+          <div style={{width:2,height:2}}/>
+          <div style={{width:12,height:6,border:`1.5px solid ${dark?"#fff":TX}`,
+            borderRadius:2,display:"flex",alignItems:"center",paddingLeft:1}}>
+            <div style={{width:"60%",height:3.5,background:dark?"#fff":TX,borderRadius:0.5}}/>
+          </div>
+        </div>
+      </div>
+      <div style={{flex:1,overflow:"auto",display:"flex",flexDirection:"column"}}>
+        {children}
+      </div>
+    </div>
+  );
+}
+
+function BotNav({ active, onTab }) {
+  return (
+    <div style={{height:64,background:WH,borderTop:`1px solid ${BR}`,
+      display:"flex",justifyContent:"space-around",alignItems:"center",flexShrink:0}}>
+      {[["d","🏠","Dashboard"],["t","✅","Aufgaben"],["m","🔔","Meldungen"],["x","☰","Mehr"]].map(([k,ic,lb])=>(
+        <div key={k} onClick={()=>onTab(k)}
+          style={{display:"flex",flexDirection:"column",alignItems:"center",
+            gap:2,cursor:"pointer",flex:1,userSelect:"none"}}>
+          <span style={{fontSize:18,filter:active===k?"none":"grayscale(100%)",
+            opacity:active===k?1:0.4,transition:"all .15s"}}>{ic}</span>
+          <span style={{fontSize:9,color:active===k?GR:MU,fontWeight:active===k?700:400}}>{lb}</span>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function MobHead({ back, title, right, onBack }) {
+  return (
+    <div style={{background:WH,padding:"10px 14px",display:"flex",alignItems:"center",
+      justifyContent:"space-between",borderBottom:`1px solid ${BR}`,flexShrink:0}}>
+      <div style={{display:"flex",alignItems:"center",gap:10}}>
+        {back && <span onClick={onBack} style={{fontSize:20,cursor:"pointer",color:BL,lineHeight:1}}>‹</span>}
+        <span style={{fontWeight:700,fontSize:14,color:TX}}>{title}</span>
+      </div>
+      {right && <span style={{color:MU,fontSize:18}}>{right}</span>}
+    </div>
+  );
+}
+
+function Sidebar({ items, active, onNav }) {
+  return (
+    <div style={{width:206,background:SB,display:"flex",flexDirection:"column",flexShrink:0}}>
+      <div style={{padding:"16px 14px 13px",borderBottom:"1px solid rgba(255,255,255,0.06)"}}>
+        <div style={{display:"flex",alignItems:"center",gap:9}}>
+          <div style={{width:30,height:30,borderRadius:8,
+            background:`linear-gradient(135deg,${GR},${GD})`,
+            display:"flex",alignItems:"center",justifyContent:"center",fontSize:15,flexShrink:0}}>🏠</div>
+          <div style={{color:"#fff",fontSize:11,fontWeight:800,lineHeight:1.25}}>
+            Hausmeister<br/>Management
+          </div>
+        </div>
+      </div>
+      <nav style={{flex:1,padding:"8px 6px",overflowY:"auto"}}>
+        {items.map(([k,ic,lb])=>(
+          <div key={k} onClick={()=>onNav(k)}
+            onMouseEnter={e=>{if(active!==k)e.currentTarget.style.background="rgba(255,255,255,0.05)";}}
+            onMouseLeave={e=>{if(active!==k)e.currentTarget.style.background="transparent";}}
+            style={{display:"flex",alignItems:"center",gap:9,padding:"8px 10px",
+              borderRadius:7,cursor:"pointer",marginBottom:1,transition:"all .12s",
+              background:active===k?"rgba(67,160,71,0.15)":"transparent",
+              color:active===k?"#fff":"rgba(255,255,255,0.5)",
+              borderLeft:active===k?`2px solid ${GR}`:"2px solid transparent"}}>
+            <span style={{fontSize:14}}>{ic}</span>
+            <span style={{fontSize:12,fontWeight:active===k?700:400}}>{lb}</span>
+          </div>
+        ))}
+      </nav>
+    </div>
+  );
+}
+
+function WebBar({ title, avatar }) {
+  return (
+    <div style={{height:52,background:WH,borderBottom:`1px solid ${BR}`,
+      display:"flex",alignItems:"center",justifyContent:"space-between",
+      padding:"0 22px",flexShrink:0}}>
+      <div style={{color:TX,fontWeight:700,fontSize:15}}>{title}</div>
+      <div style={{display:"flex",gap:10,alignItems:"center"}}>
+        <div style={{background:BG,border:`1px solid ${BR}`,borderRadius:8,
+          padding:"5px 12px",fontSize:11,color:MU,cursor:"pointer"}}>🔔</div>
+        <div style={{width:30,height:30,borderRadius:99,background:GR,
+          display:"flex",alignItems:"center",justifyContent:"center",
+          color:"#fff",fontSize:12,fontWeight:800}}>{avatar}</div>
+      </div>
+    </div>
+  );
+}
+
+/* ── QR Flow ─────────────────────────────────────────────── */
+
+function QRFlow() {
+  const [sc, setSc] = useState(0);
+  const labels = ["QR-Code scannen","Schaden melden","Meldung eingereicht","Status verfolgen"];
+
+  const Screen0 = (
+    <div key={0} style={{flex:1,background:"#0a0a0a",display:"flex",flexDirection:"column"}}>
+      <MobHead title="QR-Code scannen"/>
+      <div style={{flex:1,display:"flex",flexDirection:"column",alignItems:"center",
+        justifyContent:"center",gap:18,padding:24}}>
+        <div style={{width:190,height:190,position:"relative"}}>
+          {[{t:0,l:0,bt:"top",bl:"left"},{t:0,r:0,bt:"top",bl:"right"},
+            {b:0,l:0,bt:"bottom",bl:"left"},{b:0,r:0,bt:"bottom",bl:"right"}].map((pos,i)=>(
+            <div key={i} style={{position:"absolute",
+              top:pos.t!==undefined?pos.t:undefined,
+              bottom:pos.b!==undefined?pos.b:undefined,
+              left:pos.l!==undefined?pos.l:undefined,
+              right:pos.r!==undefined?pos.r:undefined,
+              width:30,height:30,
+              borderTop:pos.bt==="top"?`3px solid ${GR}`:"none",
+              borderBottom:pos.bt==="bottom"?`3px solid ${GR}`:"none",
+              borderLeft:pos.bl==="left"?`3px solid ${GR}`:"none",
+              borderRight:pos.bl==="right"?`3px solid ${GR}`:"none"}}/>
+          ))}
+          <div style={{position:"absolute",left:4,right:4,height:2,top:"25%",
+            background:`linear-gradient(90deg,transparent,${GR},transparent)`,
+            animation:"scan 2s ease-in-out infinite"}}/>
+          <div style={{position:"absolute",inset:24,display:"grid",
+            gridTemplateColumns:"repeat(6,1fr)",gap:2,opacity:0.5}}>
+            {Array(36).fill(0).map((_,i)=>(
+              <div key={i} style={{background:[0,1,2,3,4,5,6,12,18,24,30,31,32,33,34,35,7,8,9,10,11,25,26,27,28,29,16,17].includes(i)?GR:"transparent",borderRadius:1}}/>
+            ))}
+          </div>
+        </div>
+        <p style={{color:"rgba(255,255,255,0.6)",fontSize:12,textAlign:"center",lineHeight:1.6}}>
+          Richte die Kamera auf den QR-Code<br/>am Objekt, um Schäden zu melden
+        </p>
+        <button onClick={()=>setSc(1)} style={{background:GR,color:"#fff",border:"none",
+          borderRadius:22,padding:"9px 22px",fontSize:12,fontWeight:700,cursor:"pointer",
+          boxShadow:`0 4px 14px ${GR}55`,fontFamily:F}}>Demo: Weiter →</button>
+      </div>
+      <div style={{display:"flex",background:"#111",borderTop:"1px solid rgba(255,255,255,0.08)",flexShrink:0}}>
+        {[["📷","Scan"],["🕐","Verlauf"]].map(([ic,lb],i)=>(
+          <div key={lb} style={{flex:1,padding:"10px 0",display:"flex",flexDirection:"column",alignItems:"center",gap:2}}>
+            <span style={{fontSize:18,color:i===0?GR:"rgba(255,255,255,0.4)"}}>{ic}</span>
+            <span style={{fontSize:9,color:i===0?GR:"rgba(255,255,255,0.4)",fontWeight:i===0?700:400}}>{lb}</span>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+
+  const Screen1 = (
+    <div key={1} style={{flex:1,background:BG,display:"flex",flexDirection:"column"}}>
+      <MobHead back title="Schaden melden" onBack={()=>setSc(0)}/>
+      <div style={{flex:1,overflow:"auto",padding:12,display:"flex",flexDirection:"column",gap:10}}>
+        <div style={{background:WH,borderRadius:12,padding:13,boxShadow:"0 1px 5px rgba(0,0,0,0.07)"}}>
+          <div style={{color:MU,fontSize:9,fontWeight:800,letterSpacing:0.8,marginBottom:8}}>OBJEKT</div>
+          <div style={{display:"flex",gap:10,alignItems:"center"}}>
+            <div style={{width:32,height:32,borderRadius:9,background:GL,display:"flex",alignItems:"center",justifyContent:"center",fontSize:16}}>🏠</div>
+            <div>
+              <div style={{color:TX,fontWeight:700,fontSize:12}}>Wohnanlage Sonnenweg 12</div>
+              <div style={{color:MU,fontSize:10}}>Sonnenweg 12, 12345 Musterstadt</div>
+            </div>
+          </div>
+        </div>
+        <div style={{background:WH,borderRadius:12,padding:13,boxShadow:"0 1px 5px rgba(0,0,0,0.07)"}}>
+          <div style={{color:MU,fontSize:9,fontWeight:800,letterSpacing:0.8,marginBottom:8}}>BESCHREIBUNG *</div>
+          <textarea defaultValue="Wasserleck im Keller, es steht Wasser auf dem Boden."
+            style={{width:"100%",minHeight:65,background:BG,border:`1px solid ${BR}`,
+              borderRadius:9,padding:"8px 10px",fontSize:12,color:TX,outline:"none",
+              resize:"none",boxSizing:"border-box",fontFamily:F,lineHeight:1.5}}/>
+        </div>
+        <div style={{background:WH,borderRadius:12,padding:13,boxShadow:"0 1px 5px rgba(0,0,0,0.07)"}}>
+          <div style={{color:MU,fontSize:9,fontWeight:800,letterSpacing:0.8,marginBottom:8}}>FOTO HINZUFÜGEN</div>
+          <div style={{border:`2px dashed ${BR}`,borderRadius:10,padding:"18px 0",
+            display:"flex",flexDirection:"column",alignItems:"center",gap:5,background:BG,cursor:"pointer"}}>
+            <div style={{width:40,height:40,borderRadius:10,background:WH,border:`1px solid ${BR}`,
+              display:"flex",alignItems:"center",justifyContent:"center",fontSize:20}}>📷</div>
+            <span style={{color:MU,fontSize:11}}>Foto aufnehmen oder auswählen</span>
+          </div>
+        </div>
+        <GBtn label="Meldung senden" onClick={()=>setSc(2)}/>
+      </div>
+    </div>
+  );
+
+  const Screen2 = (
+    <div key={2} style={{flex:1,background:BG,display:"flex",flexDirection:"column",
+      alignItems:"center",justifyContent:"center",padding:24}}>
+      <div style={{width:76,height:76,borderRadius:99,background:`linear-gradient(135deg,${GR},${GD})`,
+        display:"flex",alignItems:"center",justifyContent:"center",fontSize:36,color:"#fff",
+        marginBottom:22,boxShadow:`0 8px 28px ${GR}55`}}>✓</div>
+      <div style={{color:TX,fontWeight:800,fontSize:20,textAlign:"center",marginBottom:8}}>Meldung eingereicht!</div>
+      <div style={{color:MU,fontSize:12,textAlign:"center",lineHeight:1.7,marginBottom:26}}>
+        Vielen Dank. Ihre Meldung wurde<br/>erfolgreich übermittelt.
+      </div>
+      <div style={{background:WH,borderRadius:13,padding:"14px 32px",textAlign:"center",
+        boxShadow:"0 2px 12px rgba(0,0,0,0.07)",marginBottom:26}}>
+        <div style={{color:MU,fontSize:9,letterSpacing:0.8,marginBottom:4}}>MELDUNGSNUMMER</div>
+        <div style={{color:TX,fontWeight:900,fontSize:18,letterSpacing:-0.3}}>#2024-000123</div>
+      </div>
+      <GBtn label="Zurück zur Startseite" onClick={()=>setSc(0)}/>
+      <button onClick={()=>setSc(3)} style={{marginTop:12,background:"none",border:"none",
+        color:GR,fontSize:12,fontWeight:700,cursor:"pointer",fontFamily:F}}>
+        Status verfolgen →
+      </button>
+    </div>
+  );
+
+  const Screen3 = (
+    <div key={3} style={{flex:1,background:BG,display:"flex",flexDirection:"column"}}>
+      <MobHead back title="Meldung #2024-000123" onBack={()=>setSc(2)}/>
+      <div style={{flex:1,overflow:"auto",padding:12,display:"flex",flexDirection:"column",gap:10}}>
+        <div style={{background:WH,borderRadius:12,padding:13,boxShadow:"0 1px 5px rgba(0,0,0,0.07)"}}>
+          <div style={{color:MU,fontSize:9,fontWeight:800,letterSpacing:0.8,marginBottom:6}}>OBJEKT</div>
+          <div style={{color:TX,fontWeight:700,fontSize:12}}>Wohnanlage Sonnenweg 12</div>
+          <div style={{color:MU,fontSize:10}}>Sonnenweg 12, 12345 Musterstadt</div>
+        </div>
+        <div style={{background:WH,borderRadius:12,padding:13,boxShadow:"0 1px 5px rgba(0,0,0,0.07)"}}>
+          <div style={{color:MU,fontSize:9,fontWeight:800,letterSpacing:0.8,marginBottom:8}}>STATUS</div>
+          <span style={{background:"#FFF3E0",color:"#FB8C00",borderRadius:20,padding:"3px 11px",fontSize:11,fontWeight:700}}>In Arbeit</span>
+        </div>
+        <div style={{background:WH,borderRadius:12,padding:13,boxShadow:"0 1px 5px rgba(0,0,0,0.07)"}}>
+          <div style={{color:MU,fontSize:9,fontWeight:800,letterSpacing:0.8,marginBottom:14}}>VERLAUF</div>
+          {[
+            {time:"Heute, 10:15",lb:"Meldung eingegangen",done:true},
+            {time:"Heute, 10:30",lb:"An Hausmeister zugewiesen",done:true},
+            {time:"Heute, 11:05",lb:"In Arbeit",done:false,now:true},
+            {time:"Offen",lb:"Erledigt",done:false},
+          ].map((st,i,a)=>(
+            <div key={i} style={{display:"flex",gap:10}}>
+              <div style={{display:"flex",flexDirection:"column",alignItems:"center",width:18}}>
+                <div style={{width:18,height:18,borderRadius:99,flexShrink:0,
+                  border:`2px solid ${st.done||st.now?GR:BR}`,
+                  background:st.done?GR:"transparent",
+                  display:"flex",alignItems:"center",justifyContent:"center"}}>
+                  {st.done&&<span style={{color:"#fff",fontSize:10,lineHeight:1}}>✓</span>}
+                  {st.now&&<div style={{width:7,height:7,borderRadius:99,background:GR}}/>}
+                </div>
+                {i<a.length-1&&<div style={{width:2,flex:1,background:st.done?GR:BR,margin:"2px 0"}}/>}
+              </div>
+              <div style={{paddingBottom:i<a.length-1?12:0}}>
+                <div style={{color:st.done||st.now?TX:MU,fontWeight:600,fontSize:12}}>{st.lb}</div>
+                <div style={{color:MU,fontSize:10,marginTop:1}}>{st.time}</div>
+              </div>
+            </div>
+          ))}
+        </div>
+      </div>
+      <div style={{display:"flex",background:WH,borderTop:`1px solid ${BR}`,flexShrink:0}}>
+        {[["📋","Details"],["📈","Verlauf"]].map(([ic,lb],i)=>(
+          <div key={lb} style={{flex:1,padding:"10px 0",display:"flex",flexDirection:"column",alignItems:"center",gap:2}}>
+            <span style={{fontSize:17,color:i===1?GR:MU}}>{ic}</span>
+            <span style={{fontSize:9,color:i===1?GR:MU,fontWeight:i===1?700:400}}>{lb}</span>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+
+  return (
+    <div style={{display:"flex",flexDirection:"column",alignItems:"center",gap:18}}>
+      <Phone dark={sc===0}>{[Screen0,Screen1,Screen2,Screen3][sc]}</Phone>
+      <div style={{display:"flex",flexDirection:"column",alignItems:"center",gap:8}}>
+        <div style={{display:"flex",gap:6}}>
+          {[0,1,2,3].map(i=>(
+            <div key={i} onClick={()=>setSc(i)} style={{height:7,borderRadius:99,cursor:"pointer",
+              width:sc===i?24:7,background:sc===i?"#fff":"rgba(255,255,255,0.25)",transition:"all .2s"}}/>
+          ))}
+        </div>
+        <div style={{color:"rgba(255,255,255,0.45)",fontSize:11}}>{sc+1}/4 – {labels[sc]}</div>
+      </div>
+    </div>
+  );
+}
+
+/* ── Hausmeister App ─────────────────────────────────────── */
+
+const TASKS = [
+  {id:1,ico:"🔧",t:"Heizungswartung",l:"Ahornweg 5",ti:"09:00",s:"o"},
+  {id:2,ico:"🗑️",t:"Mülltonnen bereitstellen",l:"Ahornweg 5",ti:"11:00",s:"i"},
+  {id:3,ico:"🏠",t:"Spielplatzkontrolle",l:"Sonnenweg 12",ti:"14:00",s:"o"},
+  {id:4,ico:"💡",t:"Beleuchtung prüfen",l:"Ahornweg 7",ti:"Morgen 08:00",s:"o"},
+  {id:5,ico:"🏚",t:"Dachrinnenreinigung",l:"Birkenstraße 3",ti:"15.05.",s:"e"},
+];
+const dotC = s => s==="e"?GR:s==="i"?OR:ML;
+
+function HausmeisterApp() {
+  const [tab,setTab]     = useState("d");
+  const [atab,setAtab]   = useState("o");
+  const [detail,setDetail] = useState(false);
+  const [edit,setEdit]   = useState(false);
+  const [route,setRoute] = useState(false);
+  const filtered = atab==="o"?TASKS.filter(t=>t.s==="o"):atab==="i"?TASKS.filter(t=>t.s==="i"):TASKS.filter(t=>t.s==="e");
+
+  if(edit) return (
+    <Phone>
+      <div style={{flex:1,background:BG,display:"flex",flexDirection:"column"}}>
+        <MobHead back title="Meldung bearbeiten" onBack={()=>setEdit(false)}/>
+        <div style={{flex:1,overflow:"auto",padding:12,display:"flex",flexDirection:"column",gap:10}}>
+          <div style={{background:WH,borderRadius:12,padding:13,boxShadow:"0 1px 5px rgba(0,0,0,0.07)"}}>
+            <div style={{color:MU,fontSize:9,fontWeight:800,letterSpacing:0.8,marginBottom:8}}>STATUS</div>
+            <select defaultValue="In Arbeit" style={{width:"100%",background:BG,border:`1px solid ${BR}`,borderRadius:9,padding:"9px 11px",fontSize:12,color:TX,outline:"none",fontFamily:F}}>
+              {["Neu","Zugewiesen","In Arbeit","Erledigt"].map(v=><option key={v}>{v}</option>)}
+            </select>
+          </div>
+          <div style={{background:WH,borderRadius:12,padding:13,boxShadow:"0 1px 5px rgba(0,0,0,0.07)"}}>
+            <div style={{color:MU,fontSize:9,fontWeight:800,letterSpacing:0.8,marginBottom:8}}>NOTIZ</div>
+            <textarea defaultValue="Leck gefunden und provisorisch abgedichtet. Klempner ist informiert."
+              style={{width:"100%",minHeight:70,background:BG,border:`1px solid ${BR}`,borderRadius:9,padding:"8px 10px",fontSize:12,color:TX,outline:"none",resize:"none",boxSizing:"border-box",fontFamily:F}}/>
+          </div>
+          <div style={{background:WH,borderRadius:12,padding:13,boxShadow:"0 1px 5px rgba(0,0,0,0.07)"}}>
+            <div style={{color:MU,fontSize:9,fontWeight:800,letterSpacing:0.8,marginBottom:8}}>FOTOS</div>
+            <div style={{display:"flex",gap:8}}>
+              {["Vorher","Nachher"].map(l=>(
+                <div key={l} style={{flex:1,aspectRatio:"4/3",background:BG,border:`1.5px dashed ${BR}`,borderRadius:9,display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",gap:4}}>
+                  <span style={{fontSize:18}}>📷</span><span style={{color:MU,fontSize:9}}>{l}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+          <GBtn label="Speichern" onClick={()=>{setEdit(false);setDetail(false);}}/>
+        </div>
+        <BotNav active={tab} onTab={k=>{setEdit(false);setDetail(false);setTab(k);}}/>
+      </div>
+    </Phone>
+  );
+
+  if(detail) return (
+    <Phone>
+      <div style={{flex:1,background:BG,display:"flex",flexDirection:"column"}}>
+        <MobHead back title="#2024-000123" right="⋯" onBack={()=>setDetail(false)}/>
+        <div style={{flex:1,overflow:"auto",padding:12,display:"flex",flexDirection:"column",gap:10}}>
+          <div style={{background:WH,borderRadius:12,padding:13,boxShadow:"0 1px 5px rgba(0,0,0,0.07)"}}>
+            <div style={{color:MU,fontSize:9,fontWeight:800,letterSpacing:0.8,marginBottom:6}}>OBJEKT</div>
+            <div style={{color:TX,fontWeight:700,fontSize:12}}>Wohnanlage Sonnenweg 12</div>
+            <div style={{color:MU,fontSize:10}}>Sonnenweg 12, 12345 Musterstadt</div>
+          </div>
+          <div style={{background:WH,borderRadius:12,padding:13,boxShadow:"0 1px 5px rgba(0,0,0,0.07)"}}>
+            <div style={{color:MU,fontSize:9,fontWeight:800,letterSpacing:0.8,marginBottom:6}}>BESCHREIBUNG</div>
+            <div style={{color:T2,fontSize:12,lineHeight:1.6}}>Wasserleck im Keller, es steht Wasser auf dem Boden. Leck gefunden und provisorisch abgedichtet.</div>
+          </div>
+          <div style={{background:WH,borderRadius:12,padding:13,boxShadow:"0 1px 5px rgba(0,0,0,0.07)"}}>
+            <div style={{color:MU,fontSize:9,fontWeight:800,letterSpacing:0.8,marginBottom:8}}>FOTO</div>
+            <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}}>
+              {["Vorher","Nachher"].map(l=>(
+                <div key={l} style={{aspectRatio:"4/3",background:BG,borderRadius:9,border:`1.5px dashed ${BR}`,display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",gap:4}}>
+                  <span style={{fontSize:22}}>📷</span><span style={{color:MU,fontSize:9}}>{l}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+          <div style={{background:WH,borderRadius:12,padding:13,boxShadow:"0 1px 5px rgba(0,0,0,0.07)"}}>
+            <div style={{color:MU,fontSize:9,fontWeight:800,letterSpacing:0.8,marginBottom:8}}>STATUS</div>
+            <Pill s="In Arbeit"/>
+          </div>
+          <div style={{background:WH,borderRadius:12,padding:13,boxShadow:"0 1px 5px rgba(0,0,0,0.07)"}}>
+            <div style={{color:MU,fontSize:9,fontWeight:800,letterSpacing:0.8,marginBottom:8}}>ARBEITSZEIT</div>
+            <div style={{display:"flex",gap:20}}>
+              {[["Start","14.05.2024 11:20"],["Ende","14.05.2024 12:05"]].map(([l,v])=>(
+                <div key={l}><div style={{color:MU,fontSize:9}}>{l}</div><div style={{fontWeight:600,fontSize:11,marginTop:1}}>{v}</div></div>
+              ))}
+            </div>
+          </div>
+          <div style={{display:"flex",flexDirection:"column",gap:8}}>
+            <GBtn label="Als erledigt markieren" onClick={()=>setDetail(false)}/>
+            <GBtn label="Weitere Aktionen" variant="out" onClick={()=>setEdit(true)}/>
+          </div>
+        </div>
+        <BotNav active={tab} onTab={k=>{setDetail(false);setTab(k);}}/>
+      </div>
+    </Phone>
+  );
+
+  if(route) return (
+    <Phone>
+      <div style={{flex:1,background:BG,display:"flex",flexDirection:"column"}}>
+        <MobHead back title="Tagesroute" onBack={()=>setRoute(false)}/>
+        <div style={{height:168,background:"#dce8dc",flexShrink:0,position:"relative",overflow:"hidden"}}>
+          <div style={{position:"absolute",inset:0,background:"linear-gradient(160deg,#cfe8cf,#b8d8b8)"}}/>
+          <svg style={{position:"absolute",inset:0,width:"100%",height:"100%"}}>
+            <path d="M35,135 C70,80 110,100 150,65 C185,38 220,55 270,40" stroke="#fff" strokeWidth="7" fill="none" strokeLinecap="round"/>
+            <path d="M35,135 C70,80 110,100 150,65 C185,38 220,55 270,40" stroke={GR} strokeWidth="2.5" fill="none" strokeDasharray="8,5"/>
+          </svg>
+          {[[35,135,1],[110,90,2],[185,55,3],[265,42,4]].map(([x,y,n])=>(
+            <div key={n} style={{position:"absolute",left:x-13,top:y-13,width:26,height:26,borderRadius:99,background:GR,border:"2.5px solid #fff",color:"#fff",display:"flex",alignItems:"center",justifyContent:"center",fontWeight:800,fontSize:11,boxShadow:`0 2px 8px ${GR}66`}}>{n}</div>
+          ))}
+        </div>
+        <div style={{flex:1,overflow:"auto",padding:"0 12px"}}>
+          {[["1","Ahornweg 5","09:00"],["2","Sonnenweg 12","11:00"],["3","Birkenstraße 3","13:00"],["4","Eichenweg 7","15:00"]].map(([n,a,t],i,arr)=>(
+            <div key={n} style={{display:"flex",alignItems:"center",gap:12,padding:"13px 0",borderBottom:i<arr.length-1?`1px solid ${BR}`:"none"}}>
+              <div style={{width:28,height:28,borderRadius:8,background:GL,border:`1.5px solid ${GR}33`,display:"flex",alignItems:"center",justifyContent:"center",color:GR,fontWeight:800,fontSize:12,flexShrink:0}}>{n}</div>
+              <div style={{flex:1}}><div style={{color:TX,fontWeight:700,fontSize:13}}>{a}</div></div>
+              <div style={{color:GR,fontWeight:700,fontSize:13}}>{t}</div>
+            </div>
+          ))}
+          <div style={{display:"flex",gap:10,padding:"10px 0"}}>
+            {[["24,3 km","Distanz"],["~52 Min.","Fahrzeit"],["7","Aufgaben"]].map(([v,l])=>(
+              <div key={l} style={{flex:1,background:WH,borderRadius:10,padding:"10px 8px",textAlign:"center",boxShadow:"0 1px 4px rgba(0,0,0,0.06)"}}>
+                <div style={{color:TX,fontWeight:800,fontSize:14}}>{v}</div>
+                <div style={{color:MU,fontSize:9,marginTop:2}}>{l}</div>
+              </div>
+            ))}
+          </div>
+        </div>
+        <BotNav active={tab} onTab={k=>{setRoute(false);setTab(k);}}/>
+      </div>
+    </Phone>
+  );
+
+  const screens = {
+    d:(
+      <div style={{flex:1,background:BG,display:"flex",flexDirection:"column"}}>
+        <div style={{flex:1,overflow:"auto"}}>
+          <div style={{background:`linear-gradient(140deg,${GR},${GD})`,margin:12,borderRadius:14,padding:"14px 16px",position:"relative",overflow:"hidden"}}>
+            <div style={{position:"absolute",right:-8,top:-8,fontSize:56,opacity:0.08}}>🏠</div>
+            <div style={{display:"flex",justifyContent:"space-between"}}>
+              <div>
+                <div style={{color:"rgba(255,255,255,0.75)",fontSize:10}}>Guten Morgen,</div>
+                <div style={{color:"#fff",fontWeight:800,fontSize:16}}>Max Mustermann</div>
+                <div style={{color:"rgba(255,255,255,0.65)",fontSize:10,marginTop:1}}>Dienstag, 14. Mai 2024</div>
+              </div>
+              <span style={{color:"rgba(255,255,255,0.5)",cursor:"pointer",fontSize:16}}>✕</span>
+            </div>
+          </div>
+          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8,margin:"0 12px"}}>
+            {[["8","Meine Aufgaben"],["3","Offene Meldungen"],["2","Fällige Routinearbeiten"],["1","Sonderaufträge"]].map(([n,l])=>(
+              <div key={l} style={{background:WH,borderRadius:12,padding:"12px 13px",boxShadow:"0 1px 4px rgba(0,0,0,0.07)"}}>
+                <div style={{color:TX,fontWeight:900,fontSize:24}}>{n}</div>
+                <div style={{color:MU,fontSize:10,marginTop:2,lineHeight:1.3}}>{l}</div>
+              </div>
+            ))}
+          </div>
+          <div style={{padding:"14px 12px 0"}}>
+            <div style={{color:TX,fontWeight:800,fontSize:13,marginBottom:8}}>Heute</div>
+            {[["09:00","🔧","Heizungswartung","Obj.: Ahornweg 5"],["11:00","🗑️","Mülltonnen bereitstellen","Obj.: Ahornweg 5"],["14:00","🏠","Spielplatzkontrolle","Obj.: Ahornweg 5"]].map(([t,ic,ti,sub])=>(
+              <div key={ti} onClick={()=>setDetail(true)} style={{display:"flex",gap:10,padding:"9px 0",borderBottom:`1px solid ${BR}`,alignItems:"center",cursor:"pointer"}}>
+                <span style={{color:MU,fontSize:11,fontWeight:600,width:36,flexShrink:0}}>{t}</span>
+                <span style={{fontSize:16}}>{ic}</span>
+                <div style={{flex:1}}><div style={{color:TX,fontWeight:700,fontSize:12}}>{ti}</div><div style={{color:MU,fontSize:10}}>{sub}</div></div>
+                <span style={{color:ML,fontSize:16}}>›</span>
+              </div>
+            ))}
+          </div>
+        </div>
+        <BotNav active="d" onTab={setTab}/>
+      </div>
+    ),
+    t:(
+      <div style={{flex:1,background:BG,display:"flex",flexDirection:"column"}}>
+        <div style={{background:WH,padding:"10px 14px",borderBottom:`1px solid ${BR}`,flexShrink:0}}>
+          <div style={{fontWeight:800,fontSize:14,color:TX}}>Aufgaben</div>
+        </div>
+        <div style={{display:"flex",background:WH,borderBottom:`1px solid ${BR}`,flexShrink:0}}>
+          {[["o","Offen"],["i","In Arbeit"],["e","Erledigt"]].map(([k,l])=>(
+            <div key={k} onClick={()=>setAtab(k)} style={{flex:1,padding:"9px 0",textAlign:"center",fontSize:12,fontWeight:700,cursor:"pointer",color:atab===k?GR:MU,borderBottom:atab===k?`2.5px solid ${GR}`:"2.5px solid transparent"}}>{l}</div>
+          ))}
+        </div>
+        <div style={{flex:1,overflow:"auto",padding:"10px 12px"}}>
+          {filtered.map(task=>(
+            <div key={task.id} onClick={()=>setDetail(true)} style={{background:WH,borderRadius:12,padding:"11px 13px",marginBottom:8,display:"flex",alignItems:"center",gap:10,cursor:"pointer",boxShadow:"0 1px 4px rgba(0,0,0,0.07)"}}>
+              <div style={{width:9,height:9,borderRadius:99,background:dotC(task.s),flexShrink:0}}/>
+              <span style={{fontSize:16}}>{task.ico}</span>
+              <div style={{flex:1}}><div style={{color:TX,fontWeight:700,fontSize:12}}>{task.t}</div><div style={{color:MU,fontSize:10}}>{task.l} · {task.ti}</div></div>
+              <span style={{color:ML,fontSize:16}}>›</span>
+            </div>
+          ))}
+          {filtered.length===0&&<div style={{textAlign:"center",padding:28,color:MU,fontSize:12}}>Keine Aufgaben</div>}
+        </div>
+        <div style={{padding:"10px 12px",background:WH,borderTop:`1px solid ${BR}`,flexShrink:0}}>
+          <GBtn label="+ Aufgabe erstellen"/>
+        </div>
+        <BotNav active="t" onTab={setTab}/>
+      </div>
+    ),
+    m:(
+      <div style={{flex:1,background:BG,display:"flex",flexDirection:"column"}}>
+        <div style={{background:WH,padding:"10px 14px",borderBottom:`1px solid ${BR}`,flexShrink:0}}>
+          <div style={{fontWeight:800,fontSize:14}}>Meldungen</div>
+        </div>
+        <div style={{flex:1,overflow:"auto",padding:"10px 12px"}}>
+          {[
+            {id:"#2024-000123",obj:"Wohnanlage Sonnenweg 12",typ:"Wasserschaden",s:"In Arbeit",ti:"Heute, 11:05"},
+            {id:"#2024-000122",obj:"Ahornweg 5",typ:"Beleuchtung",s:"Neu",ti:"Heute, 09:15"},
+            {id:"#2024-000121",obj:"Birkenstraße 3",typ:"Heizung",s:"Zugewiesen",ti:"Gestern"},
+          ].map(m=>(
+            <div key={m.id} onClick={()=>setDetail(true)} style={{background:WH,borderRadius:12,padding:"12px 13px",marginBottom:8,cursor:"pointer",boxShadow:"0 1px 4px rgba(0,0,0,0.07)"}}>
+              <div style={{display:"flex",justifyContent:"space-between",marginBottom:4}}>
+                <span style={{color:MU,fontSize:10}}>{m.id}</span><Pill s={m.s} small/>
+              </div>
+              <div style={{color:TX,fontWeight:700,fontSize:12}}>{m.obj}</div>
+              <div style={{color:MU,fontSize:10,marginTop:2}}>{m.typ} · {m.ti}</div>
+            </div>
+          ))}
+        </div>
+        <BotNav active="m" onTab={setTab}/>
+      </div>
+    ),
+    x:(
+      <div style={{flex:1,background:BG,display:"flex",flexDirection:"column"}}>
+        <div style={{background:WH,padding:"10px 14px",borderBottom:`1px solid ${BR}`,flexShrink:0}}>
+          <div style={{fontWeight:800,fontSize:14}}>Mehr</div>
+        </div>
+        <div style={{flex:1,overflow:"auto",padding:"10px 12px"}}>
+          {[
+            {ic:"🗺️",lb:"Tagesroute",sub:"4 Stopps geplant",action:()=>setRoute(true)},
+            {ic:"❄️",lb:"Winterdienst",sub:"Glättegefahr aktiv!",action:null},
+            {ic:"📦",lb:"Material anfragen",sub:"Streusalz, Lampen…",action:null},
+            {ic:"📷",lb:"Fotos hochladen",sub:"Vorher-/Nachher",action:null},
+            {ic:"🎤",lb:"Spracheingabe",sub:"Diktat für Berichte",action:null},
+          ].map(item=>(
+            <div key={item.lb} onClick={item.action||undefined} style={{background:WH,borderRadius:12,padding:"12px 13px",marginBottom:8,display:"flex",gap:12,alignItems:"center",cursor:"pointer",boxShadow:"0 1px 4px rgba(0,0,0,0.07)"}}>
+              <div style={{width:38,height:38,borderRadius:10,background:GL,display:"flex",alignItems:"center",justifyContent:"center",fontSize:18,flexShrink:0}}>{item.ic}</div>
+              <div style={{flex:1}}><div style={{color:TX,fontWeight:700,fontSize:13}}>{item.lb}</div><div style={{color:MU,fontSize:10}}>{item.sub}</div></div>
+              <span style={{color:ML,fontSize:16}}>›</span>
+            </div>
+          ))}
+        </div>
+        <BotNav active="x" onTab={setTab}/>
+      </div>
+    ),
+  };
+
+  return (
+    <div style={{display:"flex",flexDirection:"column",alignItems:"center",gap:18}}>
+      <Phone>{screens[tab]}</Phone>
+      <div style={{display:"flex",flexDirection:"column",alignItems:"center",gap:8}}>
+        <div style={{display:"flex",gap:6}}>
+          {["d","t","m","x"].map(k=>(
+            <div key={k} onClick={()=>setTab(k)} style={{height:7,borderRadius:99,cursor:"pointer",width:tab===k?24:7,background:tab===k?"#fff":"rgba(255,255,255,0.25)",transition:"all .2s"}}/>
+          ))}
+        </div>
+        <div style={{color:"rgba(255,255,255,0.45)",fontSize:11}}>{{"d":"Dashboard","t":"Aufgaben","m":"Meldungen","x":"Mehr"}[tab]}</div>
+      </div>
+    </div>
+  );
+}
+
+/* ── Admin Portal ─────────────────────────────────────────── */
+
+function AdminPortal() {
+  const [nav,setNav] = useState("dashboard");
+  const ITEMS = [["dashboard","📊","Dashboard"],["hausverwaltungen","🏢","Hausverwaltungen"],["nutzer","👥","Nutzer"],["objekte","🏠","Objekte"],["qrcodes","📱","QR-Codes"],["preise","💎","Pakete & Preise"],["rechnungen","💶","Rechnungen"],["audit","📋","Audit-Log"],["einstellungen","⚙️","Einstellungen"]];
+  const raw=[8,12,7,19,14,22,17,11,20,15,18,13,17,19];
+  const mx=Math.max(...raw);
+  const pts=raw.map((v,i)=>({x:(i/(raw.length-1))*100,y:88-(v/mx)*76}));
+  const line=pts.map((p,i)=>`${i?"L":"M"}${p.x},${p.y}`).join(" ");
+  const area=line+` L${pts[pts.length-1].x},100 L${pts[0].x},100 Z`;
+  return (
+    <div style={{display:"flex",height:"100%"}}>
+      <Sidebar items={ITEMS} active={nav} onNav={setNav}/>
+      <div style={{flex:1,display:"flex",flexDirection:"column",background:BG,overflow:"hidden"}}>
+        <WebBar title="Dashboard" avatar="A"/>
+        <div style={{flex:1,overflow:"auto",padding:20}}>
+          <div style={{display:"flex",gap:14,marginBottom:18}}>
+            {[["12","Hausverwaltungen","🏢",TX],["45","Hausmeister","🔧",GR],["312","Objekte","🏠",BL]].map(([n,l,ic,c])=>(
+              <div key={l} style={{flex:1,background:WH,borderRadius:12,padding:"15px 18px",border:`1px solid ${BR}`,boxShadow:"0 1px 4px rgba(0,0,0,0.05)"}}>
+                <div style={{display:"flex",justifyContent:"space-between"}}>
+                  <div><div style={{color:MU,fontSize:10,fontWeight:700,marginBottom:6,letterSpacing:0.5}}>{l.toUpperCase()}</div><div style={{color:c,fontSize:30,fontWeight:900,letterSpacing:-1}}>{n}</div></div>
+                  <span style={{fontSize:22}}>{ic}</span>
+                </div>
+              </div>
+            ))}
+          </div>
+          <div style={{background:WH,borderRadius:12,padding:"13px 18px",marginBottom:18,border:`1px solid ${BR}`,boxShadow:"0 1px 4px rgba(0,0,0,0.05)",display:"flex",alignItems:"center",gap:12}}>
+            <div style={{width:44,height:44,borderRadius:10,background:"#FEF2F2",display:"flex",alignItems:"center",justifyContent:"center",fontSize:22}}>📢</div>
+            <div><div style={{color:MU,fontSize:11}}>Offene Meldungen</div><div style={{color:RE,fontWeight:900,fontSize:26,letterSpacing:-1}}>128</div></div>
+          </div>
+          <div style={{display:"grid",gridTemplateColumns:"1.4fr 1fr",gap:16}}>
+            <div style={{background:WH,borderRadius:12,padding:"16px 18px",border:`1px solid ${BR}`,boxShadow:"0 1px 4px rgba(0,0,0,0.05)"}}>
+              <div style={{fontWeight:700,fontSize:13,color:TX,marginBottom:18}}>Meldungen (letzte 14 Tage)</div>
+              <div style={{height:110,position:"relative",marginBottom:20}}>
+                <svg viewBox="0 0 100 100" preserveAspectRatio="none" style={{width:"100%",height:"100%",overflow:"visible"}}>
+                  <defs><linearGradient id="cg2" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stopColor={GR} stopOpacity=".18"/><stop offset="100%" stopColor={GR} stopOpacity="0"/></linearGradient></defs>
+                  <path d={area} fill="url(#cg2)"/>
+                  <path d={line} stroke={GR} strokeWidth="2" fill="none" strokeLinecap="round" strokeLinejoin="round"/>
+                  {pts.map((p,i)=><circle key={i} cx={p.x} cy={p.y} r="2.2" fill={GR}/>)}
+                </svg>
+                <div style={{position:"absolute",bottom:-18,left:0,right:0,display:"flex",justifyContent:"space-between"}}>
+                  {["01","02","03","04","05","06","07","08","09","10","11","12","13","14"].map(d=>(
+                    <span key={d} style={{color:ML,fontSize:8}}>{d}</span>
+                  ))}
+                </div>
+              </div>
+            </div>
+            <div style={{background:WH,borderRadius:12,padding:"16px 18px",border:`1px solid ${BR}`,boxShadow:"0 1px 4px rgba(0,0,0,0.05)"}}>
+              <div style={{fontWeight:700,fontSize:13,color:TX,marginBottom:14}}>Letzte Aktivitäten</div>
+              {[["Max Mustermann hat eine Meldung abgeschlossen","Heute, 11:20",GR],["Neue Sonderleistung gebucht","Heute, 11:00",BL],["Rechnung RE-2024-00123 erstellt","Heute, 10:15",OR]].map(([t,ti,c],i)=>(
+                <div key={i} style={{display:"flex",gap:10,padding:"9px 0",borderBottom:i<2?`1px solid ${BR}`:"",alignItems:"flex-start"}}>
+                  <div style={{width:7,height:7,borderRadius:99,background:c,marginTop:5,flexShrink:0}}/>
+                  <div><div style={{color:T2,fontSize:12}}>{t}</div><div style={{color:ML,fontSize:10,marginTop:1}}>{ti}</div></div>
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* ── HV Portal ───────────────────────────────────────────── */
+
+function HVPortal() {
+  const [nav,setNav] = useState("dashboard");
+  const ITEMS = [["dashboard","📊","Dashboard"],["objekte","🏠","Objekte"],["meldungen","📢","Meldungen"],["aufgaben","✅","Aufgaben"],["sonder","⭐","Sonderleistungen"],["rechnungen","💶","Rechnungen"],["dokumente","📄","Dokumente"],["einstellungen","⚙️","Einstellungen"]];
+  const MELDUNGEN = [{id:"#2024-000123",s:"In Arbeit",typ:"Wasserschaden",obj:"Sonnenweg 12",ti:"Heute, 11:05"},{id:"#2024-000122",s:"Neu",typ:"Beleuchtung",obj:"Ahornweg 5",ti:"Heute, 09:15"},{id:"#2024-000121",s:"Zugewiesen",typ:"Heizung",obj:"Birkenstraße 3",ti:"Gestern, 16:40"}];
+  return (
+    <div style={{display:"flex",height:"100%"}}>
+      <Sidebar items={ITEMS} active={nav} onNav={setNav}/>
+      <div style={{flex:1,display:"flex",flexDirection:"column",background:BG,overflow:"hidden"}}>
+        <WebBar title="Dashboard" avatar="H"/>
+        <div style={{flex:1,overflow:"auto",padding:20}}>
+          <div style={{color:MU,fontSize:12,marginBottom:2}}>Willkommen,</div>
+          <div style={{color:TX,fontWeight:900,fontSize:18,marginBottom:20,letterSpacing:-0.3}}>Hausverwaltung Muster GmbH</div>
+          <div style={{display:"flex",gap:14,marginBottom:18}}>
+            {[["24","Objekte",TX,"🏠"],["7","Offene Meldungen",OR,"📢"],["5","Offene Aufgaben",GR,"✅"]].map(([n,l,c,ic])=>(
+              <div key={l} style={{flex:1,background:WH,borderRadius:12,padding:"15px 18px",border:`1px solid ${BR}`,boxShadow:"0 1px 4px rgba(0,0,0,0.05)"}}>
+                <div style={{display:"flex",justifyContent:"space-between"}}>
+                  <div><div style={{color:MU,fontSize:10,fontWeight:700,marginBottom:6,letterSpacing:0.5}}>{l.toUpperCase()}</div><div style={{color:c,fontSize:30,fontWeight:900,letterSpacing:-1}}>{n}</div></div>
+                  <span style={{fontSize:22}}>{ic}</span>
+                </div>
+              </div>
+            ))}
+          </div>
+          <div style={{background:WH,borderRadius:12,border:`1px solid ${BR}`,boxShadow:"0 1px 4px rgba(0,0,0,0.05)",marginBottom:18,overflow:"hidden"}}>
+            <div style={{padding:"13px 18px",borderBottom:`1px solid ${BR}`,display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+              <div style={{fontWeight:700,fontSize:14,color:TX}}>Offene Meldungen</div>
+              <button style={{background:GL,color:"#2E7D32",border:"none",borderRadius:7,padding:"5px 12px",fontSize:11,fontWeight:700,cursor:"pointer",fontFamily:F}}>Alle Meldungen anzeigen</button>
+            </div>
+            {MELDUNGEN.map((m,i)=>{
+              const {c}=statusStyle(m.s);
+              return (
+                <div key={m.id} style={{padding:"12px 18px",display:"flex",alignItems:"center",gap:12,borderBottom:i<MELDUNGEN.length-1?`1px solid ${BR}`:"",cursor:"pointer",transition:"background .12s"}}
+                  onMouseEnter={e=>e.currentTarget.style.background=BG}
+                  onMouseLeave={e=>e.currentTarget.style.background="transparent"}>
+                  <div style={{width:8,height:8,borderRadius:99,background:c,flexShrink:0}}/>
+                  <div style={{flex:1}}>
+                    <div style={{display:"flex",gap:8,alignItems:"center",marginBottom:2}}>
+                      <span style={{color:MU,fontSize:11}}>{m.id}</span><Pill s={m.s} small/><span style={{color:ML,fontSize:11}}>{m.ti}</span>
+                    </div>
+                    <div style={{color:TX,fontWeight:700,fontSize:13}}>{m.typ}</div>
+                    <div style={{color:MU,fontSize:11}}>{m.obj}</div>
+                  </div>
+                  <span style={{color:ML,fontSize:16}}>›</span>
+                </div>
+              );
+            })}
+          </div>
+          <div style={{background:WH,borderRadius:12,border:`1px solid ${BR}`,boxShadow:"0 1px 4px rgba(0,0,0,0.05)",overflow:"hidden"}}>
+            <div style={{padding:"13px 18px",borderBottom:`1px solid ${BR}`,fontWeight:700,fontSize:14,color:TX}}>Aufgaben</div>
+            <div style={{padding:"12px 18px",display:"flex",gap:12,alignItems:"center"}}>
+              <span style={{fontSize:18}}>🔧</span>
+              <div style={{flex:1}}><div style={{color:TX,fontWeight:700,fontSize:13}}>Heizungswartung durchführen</div><div style={{color:MU,fontSize:11}}>Ahornweg 5 · Heute</div></div>
+              <Pill s="Offen" small/>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* ── Rechnungen ──────────────────────────────────────────── */
+
+const INV_DATA=[{nr:"RE-2024-000123",kunde:"Muster GmbH",datum:"14.05.2024",betrag:"150,00 €",s:"Bezahlt"},{nr:"RE-2024-000122",kunde:"Muster GmbH",datum:"10.05.2024",betrag:"300,00 €",s:"Bezahlt"},{nr:"RE-2024-000121",kunde:"Muster GmbH",datum:"08.05.2024",betrag:"500,00 €",s:"Offen"},{nr:"RE-2024-000120",kunde:"Muster GmbH",datum:"05.05.2024",betrag:"150,00 €",s:"Bezahlt"},{nr:"RE-2024-000119",kunde:"Muster GmbH",datum:"01.05.2024",betrag:"300,00 €",s:"Bezahlt"}];
+
+function Rechnungen() {
+  const [sel,setSel] = useState(0);
+  const cur = INV_DATA[sel];
+  return (
+    <div style={{background:BG,height:"100%",display:"flex",flexDirection:"column",overflow:"hidden"}}>
+      <WebBar title="Rechnungen" avatar="H"/>
+      <div style={{flex:1,overflow:"auto",padding:20}}>
+        <div style={{display:"flex",justifyContent:"flex-end",marginBottom:14}}>
+          <button style={{background:GR,color:"#fff",border:"none",borderRadius:8,padding:"8px 16px",fontSize:12,fontWeight:700,cursor:"pointer",fontFamily:F,display:"flex",gap:6,alignItems:"center",boxShadow:`0 4px 12px ${GR}44`}}>
+            <span style={{fontSize:16}}>+</span> Neue Rechnung
+          </button>
+        </div>
+        <div style={{background:WH,borderRadius:12,border:`1px solid ${BR}`,boxShadow:"0 1px 4px rgba(0,0,0,0.05)",overflow:"hidden",marginBottom:20}}>
+          <div style={{display:"grid",gridTemplateColumns:"2fr 1.2fr 1fr 1fr 1fr",padding:"9px 18px",background:B2,borderBottom:`1px solid ${BR}`}}>
+            {["Rechnungsnr.","Kunde","Datum","Betrag","Status"].map(h=>(
+              <div key={h} style={{color:MU,fontSize:10,fontWeight:700,letterSpacing:0.5}}>{h}</div>
+            ))}
+          </div>
+          {INV_DATA.map((inv,i)=>(
+            <div key={inv.nr} onClick={()=>setSel(i)} style={{display:"grid",gridTemplateColumns:"2fr 1.2fr 1fr 1fr 1fr",padding:"12px 18px",cursor:"pointer",transition:"background .12s",borderBottom:i<INV_DATA.length-1?`1px solid ${BR}`:"",background:sel===i?GL:"transparent"}}
+              onMouseEnter={e=>{if(sel!==i)e.currentTarget.style.background=B2;}}
+              onMouseLeave={e=>{if(sel!==i)e.currentTarget.style.background="transparent";}}>
+              <div style={{color:BL,fontSize:12,fontWeight:600}}>{inv.nr}</div>
+              <div style={{color:T2,fontSize:12}}>{inv.kunde}</div>
+              <div style={{color:T2,fontSize:12}}>{inv.datum}</div>
+              <div style={{color:TX,fontSize:12,fontWeight:700}}>{inv.betrag}</div>
+              <div><Pill s={inv.s} small/></div>
+            </div>
+          ))}
+        </div>
+        <div style={{background:WH,borderRadius:12,border:`1px solid ${BR}`,boxShadow:"0 1px 4px rgba(0,0,0,0.05)",padding:22}}>
+          <div style={{fontWeight:700,fontSize:14,color:TX,marginBottom:16}}>Rechnungsvorschau ({cur.nr})</div>
+          <div style={{border:`1px solid ${BR}`,borderRadius:10,padding:20}}>
+            <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:20}}>
+              <div style={{display:"flex",gap:10,alignItems:"center"}}>
+                <div style={{width:34,height:34,borderRadius:8,background:`linear-gradient(135deg,${GR},${GD})`,display:"flex",alignItems:"center",justifyContent:"center",fontSize:16}}>🏠</div>
+                <div><div style={{fontWeight:800,fontSize:13}}>Hausmeister Management</div><div style={{color:MU,fontSize:10}}>Musterstraße 1 · 12345 Musterstadt</div></div>
+              </div>
+              <div style={{textAlign:"right"}}><div style={{fontWeight:800,fontSize:16,color:TX}}>Rechnung</div><div style={{color:MU,fontSize:11}}>{cur.nr}</div></div>
+            </div>
+            <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:14,marginBottom:20,fontSize:12}}>
+              <div><div style={{color:MU,fontSize:10,marginBottom:3}}>Kunde</div><div style={{fontWeight:700}}>Muster GmbH</div><div style={{color:MU,fontSize:11}}>Kundennr.: 10001</div></div>
+              <div style={{textAlign:"right"}}><div style={{color:MU,fontSize:10,marginBottom:3}}>Datum</div><div style={{fontWeight:700}}>{cur.datum}</div></div>
+            </div>
+            <table style={{width:"100%",borderCollapse:"collapse",fontSize:12}}>
+              <thead><tr style={{borderBottom:`2px solid ${BR}`,background:B2}}>{["Beschreibung","Menge","Einzelpreis","Gesamt"].map(h=>(<th key={h} style={{padding:"7px 8px",textAlign:"left",color:MU,fontWeight:700,fontSize:10}}>{h}</th>))}</tr></thead>
+              <tbody><tr style={{borderBottom:`1px solid ${BR}`}}><td style={{padding:"9px 8px",color:T2}}>Sonderleistung (1–2 Stunden)</td><td style={{padding:"9px 8px"}}>2,0 h</td><td style={{padding:"9px 8px"}}>75,00 €</td><td style={{padding:"9px 8px",fontWeight:700}}>150,00 €</td></tr></tbody>
+            </table>
+            <div style={{display:"flex",justifyContent:"flex-end",marginTop:14,paddingTop:14,borderTop:`2px solid ${TX}`}}>
+              <div style={{textAlign:"right"}}><div style={{color:MU,fontSize:11,marginBottom:2}}>Gesamtbetrag</div><div style={{fontWeight:900,fontSize:22,color:TX,letterSpacing:-0.5}}>{cur.betrag}</div></div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* ── Hausmeister-Service ─────────────────────────────────── */
+
+const INIT_ROLLEN=[{id:1,name:"Max Mustermann",email:"max@hausmeister.de",telefon:"0176 12345678",objekte:["Ahornweg 5","Sonnenweg 12"],berechtigungen:["Aufgaben verwalten","Meldungen bearbeiten","QR-Codes scannen"],status:"Aktiv",erstellt:"01.05.2024"},{id:2,name:"Anna Schmidt",email:"anna@hausmeister.de",telefon:"0171 98765432",objekte:["Birkenstraße 3"],berechtigungen:["Aufgaben verwalten","Meldungen bearbeiten","Rechnungen einsehen","QR-Codes scannen","Berichte erstellen"],status:"Aktiv",erstellt:"15.04.2024"},{id:3,name:"Peter Müller",email:"peter@hausmeister.de",telefon:"0172 11223344",objekte:["Eichenweg 7"],berechtigungen:["Aufgaben verwalten","QR-Codes scannen"],status:"Inaktiv",erstellt:"20.03.2024"}];
+const INIT_INV=[{nr:"RE-2024-000123",hausmeister:"Max Mustermann",datum:"14.05.2024",betrag:"150,00 €",s:"Bezahlt"},{nr:"RE-2024-000122",hausmeister:"Anna Schmidt",datum:"10.05.2024",betrag:"300,00 €",s:"Bezahlt"},{nr:"RE-2024-000121",hausmeister:"Max Mustermann",datum:"08.05.2024",betrag:"500,00 €",s:"Offen"},{nr:"RE-2024-000120",hausmeister:"Peter Müller",datum:"05.05.2024",betrag:"150,00 €",s:"Bezahlt"}];
+const OBJEKTE_LIST=["Ahornweg 5","Ahornweg 7","Sonnenweg 12","Birkenstraße 3","Eichenweg 7"];
+const BERECHT_LIST=["Aufgaben verwalten","Meldungen bearbeiten","Rechnungen einsehen","QR-Codes scannen","Berichte erstellen"];
+const rolleStyle=s=>s==="Aktiv"?{c:GR,bg:GL}:{c:MU,bg:B2};
+const invStyle=s=>s==="Bezahlt"?{c:GR,bg:GL}:{c:OR,bg:"#FFF3E0"};
+const toggle=(arr,val)=>arr.includes(val)?arr.filter(x=>x!==val):[...arr,val];
+
+function HausmeisterService() {
+  const [nav,setNav]       = useState("rollen");
+  const [rollen,setRollen] = useState(INIT_ROLLEN);
+  const [showForm,setShowForm] = useState(false);
+  const [form,setForm]     = useState({name:"",email:"",telefon:"",objekte:[],berechtigungen:[]});
+  const [formErr,setFormErr] = useState("");
+  const [invSel,setInvSel] = useState(0);
+  const HS_ITEMS=[["rollen","👷","Hausmeister-Rollen"],["rechnungen","💶","Rechnungen"],["einstellungen","⚙️","Einstellungen"]];
+
+  const handleCreate=()=>{
+    if(!form.name.trim()){setFormErr("Name ist erforderlich.");return;}
+    const heute=new Date().toLocaleDateString("de-DE",{day:"2-digit",month:"2-digit",year:"numeric"});
+    setRollen(prev=>[{id:Date.now(),...form,status:"Aktiv",erstellt:heute},...prev]);
+    setForm({name:"",email:"",telefon:"",objekte:[],berechtigungen:[]});
+    setFormErr("");setShowForm(false);
+  };
+
+  const RollenView=()=>(
+    <div style={{flex:1,overflow:"auto",padding:20}}>
+      <div style={{display:"flex",gap:14,marginBottom:18}}>
+        {[[rollen.filter(r=>r.status==="Aktiv").length,"Aktive Hausmeister",GR,"👷"],[rollen.filter(r=>r.status==="Inaktiv").length,"Inaktive",MU,"⏸️"],[rollen.length,"Gesamt",BL,"📋"]].map(([n,l,c,ic])=>(
+          <div key={l} style={{flex:1,background:WH,borderRadius:12,padding:"15px 18px",border:`1px solid ${BR}`,boxShadow:"0 1px 4px rgba(0,0,0,0.05)"}}>
+            <div style={{display:"flex",justifyContent:"space-between"}}>
+              <div><div style={{color:MU,fontSize:10,fontWeight:700,letterSpacing:.5,marginBottom:6}}>{l.toUpperCase()}</div><div style={{color:c,fontSize:30,fontWeight:900,letterSpacing:-1}}>{n}</div></div>
+              <span style={{fontSize:22}}>{ic}</span>
+            </div>
+          </div>
+        ))}
+      </div>
+      <div style={{background:WH,borderRadius:12,border:`1px solid ${BR}`,boxShadow:"0 1px 4px rgba(0,0,0,0.05)",overflow:"hidden"}}>
+        <div style={{padding:"13px 18px",borderBottom:`1px solid ${BR}`,display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+          <div style={{fontWeight:700,fontSize:14,color:TX}}>Hausmeister-Rollen verwalten</div>
+          <button onClick={()=>{setShowForm(v=>!v);setFormErr("");}} style={{background:showForm?BG:GR,color:showForm?MU:"#fff",border:showForm?`1px solid ${BR}`:"none",borderRadius:8,padding:"7px 16px",fontSize:12,fontWeight:700,cursor:"pointer",fontFamily:F,transition:"all .15s",boxShadow:showForm?"none":`0 4px 12px ${GR}44`}}>
+            {showForm?"✕ Abbrechen":"+ Neue Rolle erstellen"}
+          </button>
+        </div>
+        {showForm&&(
+          <div style={{padding:"20px 22px",borderBottom:`1px solid ${BR}`,background:BG}}>
+            <div style={{fontWeight:700,fontSize:13,color:TX,marginBottom:16}}>Neue Hausmeister-Rolle erstellen</div>
+            <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:12,marginBottom:16}}>
+              {[["NAME *","name","text","Max Mustermann"],["E-MAIL","email","email","max@beispiel.de"],["TELEFON","telefon","tel","0176 12345678"]].map(([label,key,type,ph])=>(
+                <div key={key}>
+                  <div style={{color:MU,fontSize:9,fontWeight:800,letterSpacing:.8,marginBottom:6}}>{label}</div>
+                  <input type={type} value={form[key]} placeholder={ph} onChange={e=>setForm(f=>({...f,[key]:e.target.value}))}
+                    style={{width:"100%",background:WH,border:`1px solid ${BR}`,borderRadius:8,padding:"9px 11px",fontSize:12,color:TX,outline:"none",fontFamily:F,boxSizing:"border-box"}}/>
+                </div>
+              ))}
+            </div>
+            <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:18,marginBottom:18}}>
+              <div style={{background:WH,borderRadius:10,padding:"14px 16px",border:`1px solid ${BR}`}}>
+                <div style={{color:MU,fontSize:9,fontWeight:800,letterSpacing:.8,marginBottom:10}}>OBJEKTE ZUWEISEN</div>
+                <div style={{display:"flex",flexDirection:"column",gap:7}}>
+                  {OBJEKTE_LIST.map(obj=>(<label key={obj} style={{display:"flex",alignItems:"center",gap:9,cursor:"pointer"}}><input type="checkbox" checked={form.objekte.includes(obj)} onChange={()=>setForm(f=>({...f,objekte:toggle(f.objekte,obj)}))} style={{accentColor:GR,width:14,height:14}}/><span style={{fontSize:12,color:TX}}>{obj}</span></label>))}
+                </div>
+              </div>
+              <div style={{background:WH,borderRadius:10,padding:"14px 16px",border:`1px solid ${BR}`}}>
+                <div style={{color:MU,fontSize:9,fontWeight:800,letterSpacing:.8,marginBottom:10}}>BERECHTIGUNGEN</div>
+                <div style={{display:"flex",flexDirection:"column",gap:7}}>
+                  {BERECHT_LIST.map(b=>(<label key={b} style={{display:"flex",alignItems:"center",gap:9,cursor:"pointer"}}><input type="checkbox" checked={form.berechtigungen.includes(b)} onChange={()=>setForm(f=>({...f,berechtigungen:toggle(f.berechtigungen,b)}))} style={{accentColor:GR,width:14,height:14}}/><span style={{fontSize:12,color:TX}}>{b}</span></label>))}
+                </div>
+              </div>
+            </div>
+            {formErr&&<div style={{color:"#DC2626",fontSize:12,background:"#FEF2F2",border:"1px solid #FECACA",borderRadius:8,padding:"8px 12px",marginBottom:12}}>{formErr}</div>}
+            <button onClick={handleCreate} style={{background:`linear-gradient(150deg,${GR},${GD})`,color:"#fff",border:"none",borderRadius:9,padding:"11px 28px",fontSize:13,fontWeight:700,cursor:"pointer",fontFamily:F,boxShadow:`0 4px 12px ${GR}44`}}>✓ Rolle erstellen</button>
+          </div>
+        )}
+        <div style={{display:"grid",gridTemplateColumns:"1.4fr 1.4fr 1fr 2fr 0.8fr 0.9fr",padding:"9px 18px",background:B2,borderBottom:`1px solid ${BR}`}}>
+          {["Name","E-Mail","Telefon","Berechtigungen","Status","Erstellt"].map(h=>(<div key={h} style={{color:MU,fontSize:10,fontWeight:700,letterSpacing:.5}}>{h}</div>))}
+        </div>
+        {rollen.map((r,i)=>{
+          const {c,bg}=rolleStyle(r.status);
+          return (
+            <div key={r.id} style={{display:"grid",gridTemplateColumns:"1.4fr 1.4fr 1fr 2fr 0.8fr 0.9fr",padding:"13px 18px",borderBottom:i<rollen.length-1?`1px solid ${BR}`:"",alignItems:"center",transition:"background .1s"}}
+              onMouseEnter={e=>e.currentTarget.style.background=BG}
+              onMouseLeave={e=>e.currentTarget.style.background="transparent"}>
+              <div style={{fontWeight:700,color:TX,fontSize:13}}>{r.name}</div>
+              <div style={{color:MU,fontSize:12}}>{r.email}</div>
+              <div style={{color:MU,fontSize:12}}>{r.telefon}</div>
+              <div style={{display:"flex",flexWrap:"wrap",gap:4}}>{r.berechtigungen.length>0?r.berechtigungen.map(b=>(<span key={b} style={{background:GL,color:"#2E7D32",fontSize:10,fontWeight:600,padding:"2px 8px",borderRadius:20}}>{b}</span>)):<span style={{color:ML,fontSize:11}}>Keine</span>}</div>
+              <span style={{background:bg,color:c,borderRadius:20,padding:"3px 11px",fontSize:11,fontWeight:700}}>{r.status}</span>
+              <div style={{color:MU,fontSize:12}}>{r.erstellt}</div>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+
+  const RechnungenHSView=()=>{
+    const cur=INIT_INV[invSel];
+    return (
+      <div style={{flex:1,overflow:"auto",padding:20}}>
+        <div style={{display:"flex",justifyContent:"flex-end",marginBottom:14}}>
+          <button style={{background:GR,color:"#fff",border:"none",borderRadius:8,padding:"8px 16px",fontSize:12,fontWeight:700,cursor:"pointer",fontFamily:F,display:"flex",gap:6,alignItems:"center",boxShadow:`0 4px 12px ${GR}44`}}><span style={{fontSize:16}}>+</span> Neue Rechnung</button>
+        </div>
+        <div style={{background:WH,borderRadius:12,border:`1px solid ${BR}`,boxShadow:"0 1px 4px rgba(0,0,0,0.05)",overflow:"hidden",marginBottom:20}}>
+          <div style={{display:"grid",gridTemplateColumns:"2fr 1.5fr 1fr 1fr 1fr",padding:"9px 18px",background:B2,borderBottom:`1px solid ${BR}`}}>
+            {["Rechnungsnr.","Hausmeister","Datum","Betrag","Status"].map(h=>(<div key={h} style={{color:MU,fontSize:10,fontWeight:700,letterSpacing:.5}}>{h}</div>))}
+          </div>
+          {INIT_INV.map((inv,i)=>{
+            const {c,bg}=invStyle(inv.s);
+            return (
+              <div key={inv.nr} onClick={()=>setInvSel(i)} style={{display:"grid",gridTemplateColumns:"2fr 1.5fr 1fr 1fr 1fr",padding:"12px 18px",cursor:"pointer",transition:"background .12s",borderBottom:i<INIT_INV.length-1?`1px solid ${BR}`:"",background:invSel===i?GL:"transparent"}}
+                onMouseEnter={e=>{if(invSel!==i)e.currentTarget.style.background=B2;}}
+                onMouseLeave={e=>{if(invSel!==i)e.currentTarget.style.background="transparent";}}>
+                <div style={{color:BL,fontSize:12,fontWeight:600}}>{inv.nr}</div>
+                <div style={{color:T2,fontSize:12}}>{inv.hausmeister}</div>
+                <div style={{color:T2,fontSize:12}}>{inv.datum}</div>
+                <div style={{color:TX,fontSize:12,fontWeight:700}}>{inv.betrag}</div>
+                <span style={{background:bg,color:c,borderRadius:20,padding:"2px 10px",fontSize:11,fontWeight:700}}>{inv.s}</span>
+              </div>
+            );
+          })}
+        </div>
+        <div style={{background:WH,borderRadius:12,border:`1px solid ${BR}`,boxShadow:"0 1px 4px rgba(0,0,0,0.05)",padding:22}}>
+          <div style={{fontWeight:700,fontSize:14,color:TX,marginBottom:16}}>Rechnungsvorschau ({cur.nr})</div>
+          <div style={{border:`1px solid ${BR}`,borderRadius:10,padding:20}}>
+            <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:20}}>
+              <div style={{display:"flex",gap:10,alignItems:"center"}}>
+                <div style={{width:34,height:34,borderRadius:8,background:`linear-gradient(135deg,${GR},${GD})`,display:"flex",alignItems:"center",justifyContent:"center",fontSize:16}}>🏠</div>
+                <div><div style={{fontWeight:800,fontSize:13}}>Hausmeister-Service</div><div style={{color:MU,fontSize:10}}>Musterstraße 1 · 12345 Musterstadt</div></div>
+              </div>
+              <div style={{textAlign:"right"}}><div style={{fontWeight:800,fontSize:16,color:TX}}>Rechnung</div><div style={{color:MU,fontSize:11}}>{cur.nr}</div></div>
+            </div>
+            <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:14,marginBottom:20,fontSize:12}}>
+              <div><div style={{color:MU,fontSize:10,marginBottom:3}}>Hausmeister</div><div style={{fontWeight:700}}>{cur.hausmeister}</div></div>
+              <div style={{textAlign:"right"}}><div style={{color:MU,fontSize:10,marginBottom:3}}>Datum</div><div style={{fontWeight:700}}>{cur.datum}</div></div>
+            </div>
+            <table style={{width:"100%",borderCollapse:"collapse",fontSize:12}}>
+              <thead><tr style={{borderBottom:`2px solid ${BR}`,background:B2}}>{["Beschreibung","Menge","Einzelpreis","Gesamt"].map(h=>(<th key={h} style={{padding:"7px 8px",textAlign:"left",color:MU,fontWeight:700,fontSize:10}}>{h}</th>))}</tr></thead>
+              <tbody><tr style={{borderBottom:`1px solid ${BR}`}}><td style={{padding:"9px 8px",color:T2}}>Hausmeister-Service Leistung</td><td style={{padding:"9px 8px"}}>2,0 h</td><td style={{padding:"9px 8px"}}>75,00 €</td><td style={{padding:"9px 8px",fontWeight:700}}>{cur.betrag}</td></tr></tbody>
+            </table>
+            <div style={{display:"flex",justifyContent:"flex-end",marginTop:14,paddingTop:14,borderTop:`2px solid ${TX}`}}>
+              <div style={{textAlign:"right"}}><div style={{color:MU,fontSize:11,marginBottom:2}}>Gesamtbetrag</div><div style={{fontWeight:900,fontSize:22,color:TX,letterSpacing:-.5}}>{cur.betrag}</div></div>
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  };
+
+  const titles={rollen:"Hausmeister-Rollen",rechnungen:"Rechnungen",einstellungen:"Einstellungen"};
+  return (
+    <div style={{display:"flex",height:"100%"}}>
+      <Sidebar items={HS_ITEMS} active={nav} onNav={setNav}/>
+      <div style={{flex:1,display:"flex",flexDirection:"column",background:BG,overflow:"hidden"}}>
+        <WebBar title={titles[nav]} avatar="HS"/>
+        <div style={{flex:1,overflow:"hidden",display:"flex",flexDirection:"column"}}>
+          {nav==="rollen"&&<RollenView/>}
+          {nav==="rechnungen"&&<RechnungenHSView/>}
+          {nav==="einstellungen"&&<div style={{flex:1,display:"flex",alignItems:"center",justifyContent:"center",color:MU,fontSize:13}}>Einstellungen – demnächst verfügbar</div>}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* ── Main App ────────────────────────────────────────────── */
+
+const TABS=[["qr","📱","Bewohner QR"],["app","🔧","Hausmeister App"],["adm","🛡️","Admin Portal"],["hv","🏢","HV Portal"],["inv","💶","Rechnungen"],["hs","🏠","Hausmeister-Service"]];
+
+function App() {
+  const [view,setView] = useState(window.__initialTab||"qr");
+  const mobile = view==="qr"||view==="app";
+
+  return (
+    <div style={{minHeight:"100vh",background:"#0e1822",display:"flex",flexDirection:"column"}}>
+      <div style={{background:"#091120",borderBottom:"1px solid rgba(255,255,255,0.07)",
+        display:"flex",alignItems:"stretch",padding:"0 20px",gap:0,flexShrink:0,overflowX:"auto"}}>
+        <div style={{display:"flex",alignItems:"center",gap:10,paddingRight:24,
+          borderRight:"1px solid rgba(255,255,255,0.07)",marginRight:8,flexShrink:0}}>
+          <div style={{width:28,height:28,borderRadius:7,background:`linear-gradient(135deg,${GR},${GD})`,
+            display:"flex",alignItems:"center",justifyContent:"center",fontSize:14,flexShrink:0}}>🏠</div>
+          <div>
+            <div style={{color:"#fff",fontSize:11,fontWeight:900,letterSpacing:-0.2}}>DEIN HAUSMEISTER</div>
+            <div style={{color:GR,fontSize:8,fontWeight:700,letterSpacing:2}}>BETA v0.2</div>
+          </div>
+        </div>
+        {TABS.map(([k,ic,lb])=>(
+          <button key={k} onClick={()=>setView(k)} style={{display:"flex",alignItems:"center",gap:6,padding:"0 16px",border:"none",background:"none",cursor:"pointer",fontFamily:F,fontWeight:view===k?700:500,fontSize:12,color:view===k?"#fff":"rgba(255,255,255,0.4)",borderBottom:view===k?`2.5px solid ${GR}`:"2.5px solid transparent",transition:"all .15s",whiteSpace:"nowrap"}}>
+            <span style={{fontSize:14}}>{ic}</span>{lb}
+          </button>
+        ))}
+      </div>
+      {mobile?(
+        <div style={{flex:1,display:"flex",alignItems:"flex-start",justifyContent:"center",padding:"36px 24px"}}>
+          {view==="qr"&&<QRFlow/>}
+          {view==="app"&&<HausmeisterApp/>}
+        </div>
+      ):(
+        <div style={{flex:1,overflow:"hidden",display:"flex",flexDirection:"column"}}>
+          {view==="adm"&&<AdminPortal/>}
+          {view==="hv"&&<HVPortal/>}
+          {view==="inv"&&<Rechnungen/>}
+          {view==="hs"&&<HausmeisterService/>}
+        </div>
+      )}
+    </div>
+  );
+}
+
+ReactDOM.createRoot(document.getElementById("root")).render(<App/>);
+</script>
+</body>
+</html>
