@@ -5,6 +5,7 @@ import HausmeisterApp from "../components/HausmeisterApp";
 import AdminPortal from "../components/AdminPortal";
 import HVPortal from "../components/HVPortal";
 import Rechnungen from "../components/Rechnungen";
+import HausmeisterService from "../components/HausmeisterService";
 import { GR, GD } from "../lib/theme";
 
 const TABS = [
@@ -13,6 +14,7 @@ const TABS = [
   ["adm", "🛡️", "Admin Portal"],
   ["hv",  "🏢", "HV Portal"],
   ["inv", "💶", "Rechnungen"],
+  ["hs",  "🏠", "Hausmeister-Service"],
 ];
 
 export default function App() {
@@ -56,6 +58,7 @@ export default function App() {
           {view === "adm" && <AdminPortal/>}
           {view === "hv"  && <HVPortal/>}
           {view === "inv" && <Rechnungen/>}
+          {view === "hs"  && <HausmeisterService/>}
         </div>
       )}
     </div>
